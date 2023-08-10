@@ -144,7 +144,7 @@ Autostrada *crea_nodo(Stazione *stazione) {
 
 // aggiungi_stazione
 Autostrada *aggiungi_stazione(Autostrada *autostrada, int distanza, int numero_macchine, int *macchine) {
-    if (distanza < 0 || numero_stazioni != 0 && stazione_presente(autostrada, distanza)) {
+    if (distanza < 0 || (numero_stazioni != 0 && stazione_presente(autostrada, distanza))) {
         return NULL;
     }
     Stazione *nuova_stazione = crea_stazione(distanza, numero_macchine);
@@ -178,10 +178,9 @@ Autostrada *demolisci_stazione(Autostrada *autostrada, int distanza) {
             }
             if (supporto->stazione_precedente == NULL) {
                 aggiornamento = supporto->prossima_stazione;
-                supporto->prossima_stazione->stazione_precedente = NULL;
+                aggiornamento->stazione_precedente = NULL;
                 supporto->prossima_stazione = NULL;
                 numero_stazioni--;
-                free(supporto);
                 return aggiornamento;
             }
             if (supporto->prossima_stazione == NULL) {
@@ -215,7 +214,9 @@ void inserisci_correttamente(Stazione *stazione, int numero_macchine) { // NOLIN
 }
 
 // inserisci in stazione (max heap)
-void inserisci_in_stazione(Stazione *stazione, int autonomia) { //NOLINT
+Stazione *inserisci_in_stazione(Stazione *stazione, int autonomia) { //NOLINT
+    if(stazione->numero_macchine == 512)
+        return NULL;
     int nuova_dimensione = stazione->numero_macchine + 1;
     int *nuova_memoria = realloc(stazione->macchine, nuova_dimensione * sizeof(int));
     if (nuova_memoria != NULL) {
@@ -224,16 +225,21 @@ void inserisci_in_stazione(Stazione *stazione, int autonomia) { //NOLINT
         inserisci_correttamente(stazione, stazione->numero_macchine);
         stazione->numero_macchine++;
     }
+    return stazione;
 }
 
 // aggiungi auto
 Autostrada *aggiungi_auto(Autostrada *autostrada, int distanza, int autonomia) {
     Autostrada *supporto = autostrada;
+    Stazione *controllo;
 
     while (supporto != NULL) {
         if (supporto->stazione->distanza == distanza) {
-            inserisci_in_stazione(supporto->stazione, autonomia);
-            return autostrada;
+            controllo = inserisci_in_stazione(supporto->stazione, autonomia);
+            if(controllo != NULL)
+                return autostrada;
+            else
+                return NULL;
         }
         supporto = supporto->prossima_stazione;
     }
@@ -259,7 +265,7 @@ void aggiorna_macchine(Stazione *stazione, int i) { //NOLINT
 }
 
 // rottama auto
-void rottama_macchina(Stazione *stazione, int valore_da_rimuovere) {
+int rottama_macchina(Stazione *stazione, int valore_da_rimuovere) {
     int indice_da_rimuovere = -1;
 
     for (int i = 0; i < stazione->numero_macchine; i++) {
@@ -274,7 +280,9 @@ void rottama_macchina(Stazione *stazione, int valore_da_rimuovere) {
         stazione->numero_macchine--;
 
         aggiorna_macchine(stazione, indice_da_rimuovere);
+        return 1;
     }
+    return 0;
 }
 
 // funzione rottama auto
@@ -283,8 +291,10 @@ Autostrada *rottama_auto(Autostrada *autostrada, int distanza, int autonomia) {
 
     while (supporto != NULL) {
         if (supporto->stazione->distanza == distanza) {
-            rottama_macchina(supporto->stazione, autonomia);
-            return autostrada;
+            if (rottama_macchina(supporto->stazione, autonomia))
+                return autostrada;
+            else
+                return NULL;
         }
         supporto = supporto->prossima_stazione;
     }
@@ -304,8 +314,7 @@ void stampa_percorso(Percorso *autostrada) {
         printf("%d ", tappa_corrente->tappa);
         tappa_corrente = tappa_corrente->prossima_tappa;
     }
-    printf("%d", tappa_corrente->tappa);
-    printf("\n");
+    printf("%d\n", tappa_corrente->tappa);
 }
 
 Percorso *percorso_finale;
@@ -352,6 +361,7 @@ typedef struct Cella {
     int autonomia_massima;
     struct Cella *padre;
     struct Cella *figlio;
+    struct Cella *fratello_maggiore;
     struct Cella *fratello;
 } Supporto;
 
@@ -362,16 +372,18 @@ Supporto *crea_albero(int distanza, int autonomia) {
     nuovo_albero->autonomia_massima = autonomia;
     nuovo_albero->padre = NULL;
     nuovo_albero->fratello = NULL;
+    nuovo_albero->fratello_maggiore = NULL;
     nuovo_albero->figlio = NULL;
     return nuovo_albero;
 }
 
 // inserimento in albero di supporto su un nuovo livello
-Supporto *nuovo_livello(Supporto *albero, Supporto *padre, int distanza, int autonomia) {
+Supporto *nuovo_livello(Supporto *albero, Supporto *padre, Supporto *figlio_di, int distanza, int autonomia) {
     Supporto *nuovo_albero = crea_albero(distanza, autonomia);
     nuovo_albero->padre = padre;
     nuovo_albero->figlio = NULL;
     nuovo_albero->fratello = NULL;
+    nuovo_albero->fratello_maggiore = NULL;
 
     if (padre->figlio == NULL) {
         padre->figlio = nuovo_albero;
@@ -382,7 +394,7 @@ Supporto *nuovo_livello(Supporto *albero, Supporto *padre, int distanza, int aut
         }
         ultimo_fratello->fratello = nuovo_albero;
     }
-
+    figlio_di->figlio = nuovo_albero;
     return albero;
 }
 
@@ -414,6 +426,37 @@ Supporto *aggiungi_a_livello(Supporto *albero, Supporto *padre, int distanza, in
     return albero;
 }
 
+// inserimento in albero di supporto stesso livello ma al ritorno
+Supporto *aggiungi_a_livello_ritorno(Supporto *albero, Supporto *padre, Supporto *maggiore, int distanza, int autonomia,
+                                     int livello) {
+    Supporto *nuovo_nodo = crea_albero(distanza, autonomia);
+    Supporto *nodo_da_modificare = albero;
+
+    for (int i = 0; i < livello; i++) {
+        while (nodo_da_modificare->fratello != NULL)
+            nodo_da_modificare = nodo_da_modificare->fratello;
+        if (nodo_da_modificare->figlio == NULL)
+            return albero;
+        nodo_da_modificare = nodo_da_modificare->figlio;
+    }
+
+    if (nodo_da_modificare == NULL) {
+        return albero;
+    }
+
+    Supporto *ultimo_fratello = nodo_da_modificare;
+    while (ultimo_fratello->fratello != NULL) {
+        ultimo_fratello = ultimo_fratello->fratello;
+    }
+    ultimo_fratello->fratello = nuovo_nodo;
+
+    nuovo_nodo->padre = padre;
+    nuovo_nodo->fratello = NULL;
+    nuovo_nodo->fratello_maggiore = maggiore;
+
+    return albero;
+}
+
 // stampa supporto
 void stampa_supporto(Supporto *nodo, int livello) { //NOLINT
     if (nodo == NULL) {
@@ -433,6 +476,7 @@ Percorso *pianifica_percorso(Autostrada *autostrada, int partenza, int arrivo) {
     Supporto *indicatore_livello;
     Supporto *supporto_lista;
     Supporto *ultima_stazione_raggiunta;
+    Supporto *fine_controllo = NULL;
     Autostrada *supporto_autostrada = autostrada;
     int livello_corrente = 0;
     int livello = 1;
@@ -448,8 +492,10 @@ Percorso *pianifica_percorso(Autostrada *autostrada, int partenza, int arrivo) {
             supporto_albero = crea_albero(partenza, massima_autonomia(supporto_autostrada->stazione));
             indicatore_livello = supporto_albero;
             supporto_lista = supporto_albero;
-        } else
+            ultima_stazione_raggiunta = supporto_albero;
+        } else {
             return NULL;
+        }
 
         stazione_raggiungibile =
                 supporto_autostrada->stazione->distanza + massima_autonomia(supporto_autostrada->stazione);
@@ -458,7 +504,7 @@ Percorso *pianifica_percorso(Autostrada *autostrada, int partenza, int arrivo) {
             if (stazione_raggiungibile >=
                 supporto_autostrada->stazione->distanza) {
                 if (livello) {
-                    supporto_albero = nuovo_livello(supporto_albero, indicatore_livello,
+                    supporto_albero = nuovo_livello(supporto_albero, indicatore_livello, indicatore_livello,
                                                     supporto_autostrada->stazione->distanza,
                                                     massima_autonomia(supporto_autostrada->stazione));
                     if (supporto_autostrada->stazione->distanza == arrivo) {
@@ -472,61 +518,203 @@ Percorso *pianifica_percorso(Autostrada *autostrada, int partenza, int arrivo) {
                     livello_corrente++;
                     livello = 0;
                 } else {
-                    supporto_albero = aggiungi_a_livello(supporto_albero, indicatore_livello,
+                    supporto_albero = aggiungi_a_livello(supporto_albero, indicatore_livello->padre,
                                                          supporto_autostrada->stazione->distanza,
                                                          massima_autonomia(supporto_autostrada->stazione),
                                                          livello_corrente);
+                    ultima_stazione_raggiunta = ultima_stazione_raggiunta->fratello;
                     if (supporto_autostrada->stazione->distanza == arrivo) {
-                        while (supporto_lista->padre != NULL) {
-                            percorso_finale = inserisci_in_percorso(percorso_finale, supporto_lista->distanza);
+                        while (ultima_stazione_raggiunta->padre != NULL) {
+                            if (ultima_stazione_raggiunta->distanza != arrivo)
+                                percorso_finale = inserisci_in_percorso(percorso_finale,
+                                                                        ultima_stazione_raggiunta->distanza);
+                            ultima_stazione_raggiunta = ultima_stazione_raggiunta->padre;
                         }
+                        percorso_finale = inserisci_in_percorso(percorso_finale, partenza_globale);
                         return percorso_finale;
                     }
-                    ultima_stazione_raggiunta = ultima_stazione_raggiunta->fratello;
                 }
             } else {
-                stampa_supporto(supporto_albero,0);
-                stampa_autostrada(autostrada);
+                while (fine_controllo != NULL) {
+                    stazione_raggiungibile = fine_controllo->distanza + fine_controllo->autonomia_massima;
+                    while (supporto_autostrada != NULL) {
+                        if (stazione_raggiungibile >= supporto_autostrada->stazione->distanza) {
+                            supporto_albero = aggiungi_a_livello(supporto_albero, fine_controllo,
+                                                                 supporto_autostrada->stazione->distanza,
+                                                                 massima_autonomia(supporto_autostrada->stazione),
+                                                                 livello_corrente);
+                            ultima_stazione_raggiunta = ultima_stazione_raggiunta->fratello;
+                            if (supporto_autostrada->stazione->distanza == arrivo_globale) {
+                                while (ultima_stazione_raggiunta->padre != NULL) {
+                                    if (ultima_stazione_raggiunta->distanza != arrivo)
+                                        percorso_finale = inserisci_in_percorso(percorso_finale,
+                                                                                ultima_stazione_raggiunta->distanza);
+                                    ultima_stazione_raggiunta = ultima_stazione_raggiunta->padre;
+                                }
+                                percorso_finale = inserisci_in_percorso(percorso_finale, partenza_globale);
+                                return percorso_finale;
+                            }
+                            supporto_autostrada = supporto_autostrada->prossima_stazione;
+                        } else {
+                            break;
+                        }
+                    }
+                    fine_controllo = fine_controllo->fratello;
+                }
                 while (supporto_lista != NULL) {
                     stazione_raggiungibile = supporto_lista->distanza + supporto_lista->autonomia_massima;
                     if (stazione_raggiungibile >= supporto_autostrada->stazione->distanza) {
-                        supporto_albero = nuovo_livello(supporto_albero, supporto_lista,
+                        if (supporto_autostrada->stazione->distanza == arrivo_globale) {
+                            ultima_stazione_raggiunta = supporto_lista;
+                            while (ultima_stazione_raggiunta->padre != NULL) {
+                                if (ultima_stazione_raggiunta->distanza != arrivo_globale)
+                                    percorso_finale = inserisci_in_percorso(percorso_finale,
+                                                                            ultima_stazione_raggiunta->distanza);
+                                ultima_stazione_raggiunta = ultima_stazione_raggiunta->padre;
+                            }
+                            percorso_finale = inserisci_in_percorso(percorso_finale, partenza_globale);
+                            return percorso_finale;
+                        }
+                        supporto_albero = nuovo_livello(supporto_albero, supporto_lista, indicatore_livello,
                                                         supporto_autostrada->stazione->distanza,
                                                         massima_autonomia(supporto_autostrada->stazione));
                         indicatore_livello = indicatore_livello->figlio;
-                        supporto_lista = indicatore_livello;
                         ultima_stazione_raggiunta = indicatore_livello;
-                        if (supporto_autostrada->stazione->distanza == arrivo) {
-                            while (ultima_stazione_raggiunta->padre != NULL) {
-                                if(ultima_stazione_raggiunta->distanza != arrivo)
-                                    percorso_finale = inserisci_in_percorso(percorso_finale,
-                                                                        ultima_stazione_raggiunta->distanza);
-                                ultima_stazione_raggiunta = ultima_stazione_raggiunta->padre;
-                            }
-                            percorso_finale = inserisci_in_percorso(percorso_finale,partenza_globale);
-                            return percorso_finale;
+                        livello_corrente++;
+                        if (supporto_lista->fratello != NULL) {
+                            fine_controllo = supporto_lista->fratello;
                         }
+                        supporto_lista = indicatore_livello;
                         break;
+                    } else {
+                        supporto_lista = supporto_lista->fratello;
                     }
-                    supporto_lista = supporto_lista->fratello;
                 }
-                if (supporto_lista == NULL) {
-                    return NULL;
-                }
-                supporto_lista = indicatore_livello;
             }
             supporto_autostrada = supporto_autostrada->prossima_stazione;
         }
-    }else{
-        supporto_albero = crea_albero(10,10);
-        indicatore_livello = supporto_albero;
-        supporto_lista = indicatore_livello;
-        ultima_stazione_raggiunta = indicatore_livello;
+        return NULL;
+    } else if (partenza_globale > arrivo_globale) {
+        // raggiungo la fine
+        while (supporto_autostrada->stazione->distanza != partenza_globale)
+            supporto_autostrada = supporto_autostrada->prossima_stazione;
+        // creo il primo nodo con la partenza
+        if (supporto_autostrada->stazione->distanza == partenza_globale) {
+            supporto_albero = crea_albero(partenza, massima_autonomia(supporto_autostrada->stazione));
+            indicatore_livello = supporto_albero;
+            supporto_lista = supporto_albero;
+            ultima_stazione_raggiunta = supporto_albero;
+        } else {
+            return NULL;
+        }
+        stazione_raggiungibile =
+                supporto_autostrada->stazione->distanza - massima_autonomia(supporto_autostrada->stazione);
+        supporto_autostrada = supporto_autostrada->stazione_precedente;
+        while (supporto_autostrada != NULL) {
+            if (stazione_raggiungibile <=
+                supporto_autostrada->stazione->distanza) {
+                if (livello) {
+                    supporto_albero = nuovo_livello(supporto_albero, indicatore_livello, indicatore_livello,
+                                                    supporto_autostrada->stazione->distanza,
+                                                    massima_autonomia(supporto_autostrada->stazione));
+                    if (supporto_autostrada->stazione->distanza == arrivo) {
+                        percorso_finale = inserisci_in_percorso(percorso_finale,
+                                                                supporto_albero->padre->distanza);
+                        return percorso_finale;
+                    }
+                    indicatore_livello = indicatore_livello->figlio;
+                    supporto_lista = indicatore_livello;
+                    ultima_stazione_raggiunta = indicatore_livello;
+                    livello_corrente++;
+                    livello = 0;
+                } else {
+                    supporto_albero = aggiungi_a_livello_ritorno(supporto_albero, indicatore_livello->padre,
+                                                                 ultima_stazione_raggiunta,
+                                                                 supporto_autostrada->stazione->distanza,
+                                                                 massima_autonomia(supporto_autostrada->stazione),
+                                                                 livello_corrente);
+                    ultima_stazione_raggiunta = ultima_stazione_raggiunta->fratello;
+                    indicatore_livello = indicatore_livello->fratello;
+                    supporto_lista = supporto_lista->fratello;
+                    if (supporto_autostrada->stazione->distanza == arrivo_globale) {
+                        while (ultima_stazione_raggiunta->padre != NULL) {
+                            if (ultima_stazione_raggiunta->distanza != arrivo)
+                                percorso_finale = inserisci_in_percorso(percorso_finale,
+                                                                        ultima_stazione_raggiunta->distanza);
+                            ultima_stazione_raggiunta = ultima_stazione_raggiunta->padre;
+                        }
+                        percorso_finale = inserisci_in_percorso(percorso_finale, partenza_globale);
+                        return percorso_finale;
+                    }
+                }
+            } else {
+                while (fine_controllo != NULL) {
+                    stazione_raggiungibile = fine_controllo->distanza - fine_controllo->autonomia_massima;
+                    while (supporto_autostrada != NULL) {
+                        if (stazione_raggiungibile <= supporto_autostrada->stazione->distanza) {
+                            supporto_albero = aggiungi_a_livello_ritorno(supporto_albero, fine_controllo,
+                                                                         ultima_stazione_raggiunta,
+                                                                         supporto_autostrada->stazione->distanza,
+                                                                         massima_autonomia(
+                                                                                 supporto_autostrada->stazione),
+                                                                         livello_corrente);
+                            ultima_stazione_raggiunta = ultima_stazione_raggiunta->fratello;
+                            indicatore_livello = indicatore_livello->fratello;
+                            supporto_lista = supporto_lista->fratello;
+                            if (supporto_autostrada->stazione->distanza == arrivo_globale) {
+                                while (ultima_stazione_raggiunta->padre != NULL) {
+                                    if (ultima_stazione_raggiunta->distanza != arrivo)
+                                        percorso_finale = inserisci_in_percorso(percorso_finale,
+                                                                                ultima_stazione_raggiunta->distanza);
+                                    ultima_stazione_raggiunta = ultima_stazione_raggiunta->padre;
+                                }
+                                percorso_finale = inserisci_in_percorso(percorso_finale, partenza_globale);
+                                return percorso_finale;
+                            }
+                            supporto_autostrada = supporto_autostrada->stazione_precedente;
+                        } else {
+                            break;
+                        }
+                    }
+                    fine_controllo = fine_controllo->fratello_maggiore;
+                }
+                while (supporto_lista != NULL) {
+                    stazione_raggiungibile = supporto_lista->distanza - supporto_lista->autonomia_massima;
+                    if (stazione_raggiungibile <= supporto_autostrada->stazione->distanza) {
+                        // DA AGGIUSTARE: SCELGO ULTIMO PERCORSO CHE TROVA ARRIVO_GLOBALE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                        if (supporto_autostrada->stazione->distanza == arrivo_globale) {
+                            ultima_stazione_raggiunta = supporto_lista;
+                            while (ultima_stazione_raggiunta->padre != NULL) {
+                                if (ultima_stazione_raggiunta->distanza != arrivo_globale)
+                                    percorso_finale = inserisci_in_percorso(percorso_finale,
+                                                                            ultima_stazione_raggiunta->distanza);
+                                ultima_stazione_raggiunta = ultima_stazione_raggiunta->padre;
+                            }
+                            percorso_finale = inserisci_in_percorso(percorso_finale, partenza_globale);
+                            return percorso_finale;
+                        }
+                        supporto_albero = nuovo_livello(supporto_albero, supporto_lista, indicatore_livello,
+                                                        supporto_autostrada->stazione->distanza,
+                                                        massima_autonomia(supporto_autostrada->stazione));
+                        indicatore_livello = indicatore_livello->figlio;
+                        ultima_stazione_raggiunta = indicatore_livello;
+                        livello_corrente++;
+                        if (supporto_lista->fratello_maggiore != NULL) {
+                            fine_controllo = supporto_lista->fratello_maggiore;
+                        }
+                        supporto_lista = indicatore_livello;
+                        break;
+                    } else {
+                        supporto_lista = supporto_lista->fratello_maggiore;
+                        // NULL PROBLEMA
+                    }
+                }
+            }
+            supporto_autostrada = supporto_autostrada->stazione_precedente;
+        }
+        // nuovo livello con il non raggiunto e cerco padre
+        // termino sull'arrivo e aggiorno lista
     }
-    free(supporto_albero);
-    free(supporto_lista);
-    free(indicatore_livello);
-    free(ultima_stazione_raggiunta);
     return NULL;
 }
 
@@ -540,82 +728,105 @@ int main() {
 
     while (scanf("%s", istruzione) != EOF) {
         if (strcmp(istruzione, "aggiungi-stazione") == 0) { //NOLINT
+            supporto = autostrada;
+
             int distanza;
-            if (scanf("%d", &distanza)) { //NOLINT
+            if (scanf("%d", &distanza)) {//NOLINT
             }
+
             int numero_macchine;
             int *macchine;
             if (scanf("%d", &numero_macchine)) { //NOLINT
+            }
+
+            if(distanza < 0 || numero_macchine < 0 || numero_macchine > 512){
+                printf("non aggiunta\n");
+            }else{
                 macchine = malloc(numero_macchine * sizeof(int));
                 for (int i = 0; i < numero_macchine; i++) {
                     if (scanf("%d", &macchine[i])) { //NOLINT
                     }
                 }
                 supporto = aggiungi_stazione(supporto, distanza, numero_macchine, macchine);
-            }
-            if (supporto != NULL) {
-                printf("aggiunta\n");
-                autostrada = supporto;
-            } else {
-                printf("non aggiunta\n");
-                supporto = autostrada;
+                if (supporto != NULL) {
+                    printf("aggiunta\n");
+                    autostrada = supporto;
+                } else {
+                    printf("non aggiunta\n");
+                    supporto = autostrada;
+                }
             }
         } else if (strcmp(istruzione, "demolisci-stazione") == 0) { //NOLINT
+            supporto = autostrada;
             if (numero_stazioni == 0) { printf("non demolita\n"); }
             else {
                 int distanza;
                 if (scanf("%d", &distanza)) {}//NOLINT
-                if (stazione_presente(autostrada, distanza) == 0) {
+                if(distanza < 0){
                     printf("non demolita\n");
-                } else {
-                    autostrada = demolisci_stazione(autostrada, distanza);
-                    if (autostrada != NULL) {
-                        printf("demolita\n");
+                }else{
+                    if (stazione_presente(autostrada, distanza) == 0) {
+                        printf("non demolita\n");
                     } else {
-                        if (numero_stazioni == 0)
+                        supporto = demolisci_stazione(supporto, distanza);
+                        if (supporto != NULL) {
                             printf("demolita\n");
-                        else {
-                            autostrada = autostrada;
+                            autostrada = supporto;
+                        } else {
                             printf("non demolita\n");
+                            supporto = autostrada;
                         }
                     }
                 }
             }
         } else if (strcmp(istruzione, "aggiungi-auto") == 0) { //NOLINT
+            supporto = autostrada;
+
             if (numero_stazioni == 0) { printf("non aggiunta\n"); }
             else {
                 int distanza;
                 int autonomia_auto;
                 if (scanf("%d", &distanza)) {} // NOLINT
                 if (scanf("%d", &autonomia_auto)) {} // NOLINT
-                if (stazione_presente(autostrada, distanza) == 0)
+                if (distanza < 0 || autonomia_auto < 0)
                     printf("non aggiunta\n");
-                else {
-                    autostrada = aggiungi_auto(autostrada, distanza, autonomia_auto);
-                    if (autostrada != NULL) {
-                        printf("aggiunta\n");
-                    } else {
-                        autostrada = autostrada;
+                else{
+                    if (stazione_presente(autostrada, distanza) == 0)
                         printf("non aggiunta\n");
+                    else {
+                        supporto = aggiungi_auto(supporto, distanza, autonomia_auto);
+                        if (supporto != NULL) {
+                            printf("aggiunta\n");
+                            autostrada = supporto;
+                        } else {
+                            printf("non aggiunta\n");
+                            supporto = autostrada;
+                        }
                     }
                 }
             }
         } else if (strcmp(istruzione, "rottama-auto") == 0) { //NOLINT
+            supporto = autostrada;
             if (numero_stazioni == 0) { printf("non rottamata\n"); }
             else {
                 int distanza;
                 int autonomia_auto;
                 if (scanf("%d", &distanza)) {} // NOLINT
                 if (scanf("%d", &autonomia_auto)) {} //NOLINT
-                if (stazione_presente(autostrada, distanza) == 0) {
+                if(distanza < 0 || autonomia_auto < 0)
                     printf("non rottamata\n");
-                } else {
-                    autostrada = rottama_auto(autostrada, distanza, autonomia_auto);
-                    if (autostrada != NULL) {
-                        printf("rottamata\n");
-                    } else {
-                        autostrada = autostrada;
+                else{
+                    if (stazione_presente(autostrada, distanza) == 0) {
                         printf("non rottamata\n");
+                    } else {
+                        supporto = rottama_auto(supporto, distanza, autonomia_auto);
+                        if (supporto != NULL) {
+                            printf("rottamata\n");
+                            autostrada = supporto;
+                        } else {
+                            printf("non rottamata\n");
+                            supporto = autostrada;
+                        }
                     }
                 }
             }
@@ -639,6 +850,8 @@ int main() {
             } else {
                 printf("nessun percorso\n");
             }
+        } else if (strcmp(istruzione, "stampa") == 0) {
+            stampa_autostrada(autostrada);
         }
     }
     return 0;
