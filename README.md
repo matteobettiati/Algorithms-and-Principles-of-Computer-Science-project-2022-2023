@@ -35,3 +35,14 @@ Expected Printout as Response: scrapped or not scrapped.
 * pianifica-percorso start-station-distance end-station-distance
 Requests planning a route following the above constraints.
 Expected Printout as Response: the stages in order of travel, represented by the distances from the highway's start, separated by spaces, and ending with a line break. The starting and ending points must be included; if they coincide, the station is printed only once. If the route doesn't exist, it prints no route. The planning action doesn't alter the stations or their vehicle fleets. The given stations are definitely present.
+
+# Testing
+To test it:
+- download the zip of the repository
+- open the terminal where you saved the main.c file
+- run the following commands:
+- gcc main.c test
+- ./test < "here take one of the file in the test folder (not the output ones)" > "here put a file where you want to store the results"
+
+If you want to check if the result is correct:
+- run "diff filename1 filename2", where filename1 contains the output of my program and filename2 you have to chose the output file that correspons to the correct number.
